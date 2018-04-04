@@ -1,0 +1,211 @@
+% HW 4 Problem 1 
+% Run Program by section
+%% Import Images to be Warped
+
+F = imread('box3.jpg');
+F = imresize(F,0.5);
+M = imread('box4.jpg');
+M = imresize(M, 0.5);
+%tform = affine2d([1 0 0; .5 1 0; 0 0 1]);
+% M = imwarp(F,tform);
+% [h,w] = size(F);
+% 
+% xoff = 75;					%offset to center image
+% 
+%M = M(1:h,xoff:w+xoff);		%crop image
+
+imshow(F); 
+figure;
+imshow(M);
+
+%% Get Sparse Points
+% NEED TO RUN CP SELECT AND EXPORT POINTS 
+points = cpselect(M,F);
+
+% Variables are
+fixedPoints                   %   *  row1 : x1,y1       row2: x2, y2
+movingPoints 
+
+%% Build Matrices
+% Ax = B
+
+% Build A Matrix
+p_count = size(fixedPoints,1);
+radius_mat = zeros(p_count + 3);
+
+% Fill Sidebar with positions
+radius_mat(1:p_count,p_count+3) = ones(p_count,1);
+radius_mat(1:p_count,p_count+1:p_count+2) = fixedPoints;
+
+% Fill Bottom with positions
+radius_mat(p_count+3,1:p_count) = ones(1,p_count);
+radius_mat(p_count+1:p_count+2,1:p_count) = fixedPoints.';
+
+% Get radius
+for i = 1:p_count
+	for n = 1:p_count
+		if i ~= n													% Avoid Messing with Log of 0
+			r = sqrt((fixedPoints(i,1)-fixedPoints(n,1))^2 +  ...	% Find Radius
+				(fixedPoints(i,2)-fixedPoints(n,2))^2);
+			radius_mat(i,n) = r^2*log(r);							% Apply Radial Basis funciton
+		end 
+	end	
+end
+
+% Build B matrix
+mov_matrix = zeros(p_count + 3, 2);
+mov_matrix(1:p_count,:) = movingPoints;
+
+%% Calculate Spline Parameters and function
+
+result = radius_mat\mov_matrix;			%Solve for x matrix
+
+% Extract Coeffciants
+a11 = result(p_count + 1 , 1);			
+a21 = result(p_count + 1 , 2);
+a12 = result(p_count + 2 , 1);
+a22 = result(p_count + 2 , 2);
+b1  = result(p_count + 3 , 1);
+b2  = result(p_count + 3 , 2);
+
+M = image1;
+F = image2;
+% Determine point to show transformation
+imshow(F);
+title('Click Point, Press Enter to confirm Point');
+[x, y] = getpts;
+close all;
+
+% x = 333;
+% y = 263;
+
+x_adj = 0;		% Output of function
+y_adj = 0; 
+
+
+
+%Use function from section 5.2 to calculate trasnfomation
+for i = 1:p_count
+	
+	temp = sqrt((fixedPoints(i,1) - x)^2 +  ...	%Find Radius
+				(fixedPoints(i,2) - y)^2);		
+	temp = temp^2*log(temp);
+	x_adj = x_adj + result(i,1) * temp; 
+	y_adj = y_adj + result(i,2) * temp;
+	
+end
+
+x_adj = x_adj  + a11*x + a12*y + b1;
+y_adj = y_adj + a21*x + a22*y + b2;
+
+
+%plot results
+imshow(M);
+hold on;
+plot(x_adj , y_adj,'*y');
+
+
+%% part c
+%get size for the new image
+fixedPoints = fp;
+movingPoints = mp;
+xn = size(F, 2);
+yn = size(F,1);
+
+upper_l = mywarp(result, p_count, 1, 1, fixedPoints); %x, y
+upper_r = mywarp(result, p_count, xn, 1, fixedPoints); %x, y
+lower_l = mywarp(result, p_count, 1, yn, fixedPoints); %x, y
+lower_r =  mywarp(result, p_count, xn, yn, fixedPoints); %x, y
+
+m = [upper_l; upper_r; lower_l; lower_r];
+max_m = max(m, [], 1); %get max x, max y
+min_m = min(m, [], 1);
+
+width = round(max_m(1) - min_m(1)) + 1;
+height = round(max_m(2) - min_m(2)) + 1;
+
+img = zeros(height, width,3);
+
+%push all points in im1 to im2
+dt_mat = [];
+z_out1 = [];
+z_out2 = [];
+z_out3 = [];
+xn = int16(size(F, 2));
+yn = int16(size(F,1));
+for i = 1:xn
+    for j = 1:yn       
+        p = mywarp(result, p_count, double(i), double(j), fixedPoints);
+        x_t = p(1) - min_m(1) + 1;
+        y_t = p(2) - min_m(2) + 1;
+        dt_mat = [dt_mat; y_t x_t];
+        z_out1 = [z_out1; F(j, i, 1)];
+        z_out2 = [z_out2; F(j, i, 2)];
+        z_out3 = [z_out3; F(j, i, 3)];
+        x_t = int16(ceil(x_t)) + 1;
+        y_t = int16(ceil(y_t)) + 1;
+        if x_t < 1
+            x_t = 1;
+        end
+        if y_t < 1
+            y_t = 1;
+        end
+        img(y_t, x_t, 1) = F(j, i, 1);
+        img(y_t, x_t, 2) = F(j, i, 2);
+        img(y_t, x_t, 3) = F(j, i, 3);
+    end
+end
+imshow(uint8(img));
+%%
+%Use Delaunay Triangulation to get the interpolant function
+z_out1=double(z_out1);
+z_out2=double(z_out2);
+z_out3=double(z_out3);
+DT = delaunayTriangulation(dt_mat);
+F_interp1 = scatteredInterpolant(DT.Points,z_out1);
+F_interp2 = scatteredInterpolant(DT.Points,z_out2);
+F_interp3 = scatteredInterpolant(DT.Points,z_out3);
+
+for i = 1:size(img,1)
+    for j = 1:size(img,2)
+        img(i, j, 1) = F_interp1(i, j);
+        img(i, j, 2) = F_interp2(i, j);
+        img(i, j, 3) = F_interp3(i, j);
+    end
+end
+img = uint8(img);
+figure;
+imshow(img);
+%% part (d)
+%% initialize the variables here, then use the code above.
+%get features
+Fg = rgb2gray(F);
+Mg = rgb2gray(M);
+pointsF= detectSURFFeatures(Fg, 'NumScaleLevels',5, 'MetricThreshold', 700);
+pointsM = detectSURFFeatures(Mg, 'NumScaleLevels', 5, 'MetricThreshold', 700);
+[featuresF,valid_pointsF] = extractFeatures(Fg,pointsF);
+[featuresM,valid_pointsM] = extractFeatures(Mg,pointsM);
+indexPairs = matchFeatures(featuresF,featuresM, 'Unique', true, 'MatchThreshold', 20);
+matchedPointsF = valid_pointsF(indexPairs(:,1),:);
+matchedPointsM = valid_pointsM(indexPairs(:,2),:);
+fixedPoints = matchedPointsF.Location;
+movingPoints = matchedPointsM.Location;
+figure; showMatchedFeatures(I1,I2,matchedPoints1,matchedPoints2);
+legend('matched points 1','matched points 2');
+%%
+
+%show mathed features
+imshow(Fg);
+hold on;
+plot(fixedPoints(:,1), fixedPoints(:,2),'*y');
+figure;
+imshow(Mg);
+hold on;
+plot(movingPoints(:,1), movingPoints(:,2),'*y');
+
+% set boundary
+fixedPoints = [fixedPoints; 1-0.5 1-0.5; size(F,2)-0.5 1-0.5; 1-0.5 size(F,1)-0.5 ; size(F,2)-0.5 size(F,1)-0.5];
+movingPoints = [movingPoints; 1-0.5 1-0.5; size(M,2)-0.5 1-0.5; 1-0.5 size(M,1)-0.5; size(M,2)-0.5 size(M,1)-0.5];
+fixedPoints = double(fixedPoints);
+movingPoints = double(movingPoints);
+
